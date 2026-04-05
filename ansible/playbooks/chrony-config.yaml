@@ -15,8 +15,3 @@
         name: chronyd
         state: restarted
         enabled: yes
-    - name: enable chrony
-      ansible.builtin.dnf:
-        name: python3-requests
-        state: absent
-        autoremove: yes
