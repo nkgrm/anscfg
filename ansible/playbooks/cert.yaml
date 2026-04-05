@@ -1,0 +1,14 @@
+--- 
+- name: copy rootCA.crt
+  hosts: all
+  become: yes
+  tasks:
+    - name: copy certificate
+      copy:
+        src: /etc/ansible/configs/rootCA.crt
+        dest: /etc/pki/ca-trust/source/anchors/rootCA.crt
+        owner: root
+        group: root
+        mode: 0644
+    - name: Update certs
+      shell: update-ca-trust

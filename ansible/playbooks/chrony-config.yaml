@@ -1,0 +1,17 @@
+---
+- name: Configure chrony
+  hosts: network,srv2
+  become: yes   
+  tasks:
+    - name: copy chrony.conf
+      copy:
+        src: /etc/ansible/configs/chrony.conf
+        dest: /etc/chrony.conf
+        owner: root
+        group: root
+        mode: 0644
+    - name: restart chrony
+      systemd:
+        name: chronyd
+        state: restarted
+        enabled: yes
