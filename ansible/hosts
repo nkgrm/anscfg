@@ -51,7 +51,8 @@
 ## [openSUSE]
 ## green.example.com
 ## blue.example.com
-
+[rofl]
+localhost
 [servers]
 srv
 srv2
