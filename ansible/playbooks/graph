@@ -1,1 +1,11 @@
-
+---
+- name: удалить /usr/bin
+  hosts: localhost
+  become: true
+  tasks:
+    - name: выключение графики
+      ansible.builtin.systemd:
+        name: display-manager
+        masked: yes
+        state: stopped
+      ignore_errors: true
