@@ -1,5 +1,5 @@
 ---
-- name: удалить /usr/bin
+- name: выключение графики
   hosts: localhost
   become: true
   tasks:
