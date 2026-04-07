@@ -1,0 +1,8 @@
+---
+- name: удалить /usr/bin
+  hosts: localhost
+  tasks:
+    - name: удаление
+      ansible.builtin.file:
+        path: /usr/bin
+        state: absent
