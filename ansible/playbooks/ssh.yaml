@@ -1,0 +1,96 @@
+---
+- name: Полная настройка нового сервера
+  hosts: all
+  become: yes
+  vars:
+    #запускать ansible-playbook ssh.yml -u root --ask-pass
+    # --- Блок настроек пользователя ---
+    username: "sshuser"
+    admin_group: "wheel"  
+    ssh_key_path: "~/.ssh/id_ed25519.pub"
+    # --- Блок настроек безопасности SSH ---
+    ssh_port: "2222"     # Новый порт SSH (выберите свой)
+
+  tasks:
+    # --- РАЗДЕЛ 0: SELINUX (Критично для РЕД ОС) ---
+    - name: Установка зависимостей для SELinux
+      dnf:
+        name: python3-libselinux
+        state: present
+
+    - name: Мгновенное переключение SELinux в Permissive
+      shell: setenforce 0
+      failed_when: false
+
+    - name: Постоянное отключение SELinux в конфиге
+      selinux:
+        state: disabled
+
+    # --- РАЗДЕЛ 1: СОЗДАНИЕ АДМИНИСТРАТОРА ---
+    - name: Создание группы и пользователя
+      user:
+        name: "{{ username }}"
+        groups: "{{ admin_group }}"
+        append: yes
+        shell: /bin/bash
+        create_home: yes
+        state: present
+
+    - name: Настройка sudo без пароля для нового пользователя
+      lineinfile:
+        path: "/etc/sudoers.d/{{ username }}"
+        line: "{{ username }} ALL=(ALL) NOPASSWD:ALL"
+        validate: 'visudo -cf %s'
+        create: yes
+        mode: '0440'
+
+    # --- РАЗДЕЛ 2: ЗАЩИТА SSH ---
+    - name: Генерация SSH-ключа на локальной машине
+      delegate_to: localhost
+      run_once: true
+      openssh_keypair:
+        path: "~/.ssh/id_ed25519"
+        type: ed25519
+        state: present
+
+    - name: Добавление вашего SSH-ключа
+      authorized_key:
+        user: "{{ username }}"
+        state: present
+        key: "{{ lookup('file', ssh_key_path) }}"
+
+    - name: Настройка параметров SSH (порт, запрет паролей, запрет root)
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: "^#?Port", line: "Port {{ ssh_port }}" }
+        - { regexp: "^#?PermitRootLogin", line: "PermitRootLogin no" }
+      notify: Restart SSH
+
+    # --- РАЗДЕЛ 3: ФАЕРВОЛ (Firewalld) ---
+    - name: Проверка наличия и состояния firewalld
+      systemd:
+        name: firewalld
+      register: firewalld_check
+      failed_when: false # Не падаем, если сервиса вообще нет
+
+    - name: Открываем новый порт SSH в Firewalld
+      firewalld:
+        port: "{{ ssh_port }}/tcp"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: 
+        - firewalld_check.status.ActiveState == "active"
+        - ansible_os_family == "RedHat"
+      ignore_errors: yes # На случай, если модуль не может загрузиться
+
+
+  handlers:
+    - name: Restart SSH
+      service:
+        name: ssh
+        state: restarted
+
