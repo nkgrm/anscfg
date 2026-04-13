@@ -1,0 +1,51 @@
+---
+- name: Пошаговое создание инфраструктуры CA на РЕД ОС
+  hosts: all
+  become: srv
+  vars:
+    cert_dir: "/root/openssl"
+    ca_passphrase: P@ssw0rd
+
+  tasks:
+    - name: 1. Создание защищенной директории
+      ansible.builtin.file:
+        path: "{{ cert_dir }}"
+        state: directory
+        mode: '0700'
+        owner: root
+
+    - name: 2 Создание приватного ключа CA (AES-128-CBC)
+      community.crypto.openssl_privatekey:
+        path: "{{ cert_dir }}/rootCA.key"
+        passphrase: "{{ ca_passphrase }}"
+        cipher: aes128
+        size: 2048
+        type: RSA
+        owner: root
+        mode: '0600'
+
+    - name: 3 Создание CSR (запроса) для сертификата CA
+      community.crypto.openssl_csr_pipe:
+        privatekey_path: "{{ cert_dir }}/rootCA.key"
+        privatekey_passphrase: "{{ ca_passphrase }}"
+        common_name: "SRV.LAB.LOCAL"
+        country_name: "RU"
+        state_or_province_name: "Tatarstan"
+        locality_name: "Almet"
+        organization_name: "LAB.LOCAL"
+        organizational_unit_name: "SRV"
+        email_address: "postmaster@lab.local"
+        digest: sha256
+      register: ca_csr
+
+    - name: 4 Создание самоподписанного сертификата CA (на 365 дней)
+      community.crypto.x509_certificate:
+        path: "{{ cert_dir }}/rootCA.crt"
+        csr_content: "{{ ca_csr.csr }}"
+        privatekey_path: "{{ cert_dir }}/rootCA.key"
+        privatekey_passphrase: "{{ ca_passphrase }}"
+        provider: selfsigned
+        selfsigned_not_after: "+365d"
+        owner: root
+        mode: '0644'
+
