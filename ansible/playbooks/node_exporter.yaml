@@ -1,0 +1,71 @@
+---
+- name: Установка Node Exporter согласно конфигурации
+  hosts: all
+  become: yes
+  vars:
+    # Задайте актуальную версию для скачивания
+    version: "node_exporter-1.10.2.linux-amd64"
+    user_name: "nodeusr"
+
+  tasks:
+    - name: Создать группу {{ user_name }}
+      group:
+        name: "{{ user_name }}"
+        system: yes
+
+    - name: Создать пользователя {{ user_name }}
+      user:
+        name: "{{ user_name }}"
+        group: "{{ user_name }}"
+        shell: /usr/sbin/nologin
+        system: yes
+        create_home: no
+
+    - name: Скачать и распаковать бинарный файл
+      unarchive:
+        src: "https://github.com/prometheus/node_exporter/releases/download/v1.10.2/{{ version }}.tar.gz"
+        dest: /tmp
+        remote_src: yes
+
+    - name: Копировать бинарный файл в /usr/bin
+      copy:
+        src: "/tmp/{{ version }}/node_exporter"
+        dest: /usr/bin/node_exporter
+        mode: '0755'
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        remote_src: yes
+
+    - name: Создать systemd unit файл
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Node Exporter
+          After=network.target
+
+          [Service]
+          User={{ user_name }}
+          Group={{ user_name }}
+          Type=simple
+          ExecStart=/usr/bin/node_exporter
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Запустить сервис и добавить в автозагрузку
+      systemd:
+        name: node_exporter
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Проверить статус службы
+      command: systemctl status node_exporter
+      register: service_status
+      changed_when: false
+
+    - name: Показать статус
+      debug:
+        var: service_status.stdout_lines
+
