@@ -86,8 +86,23 @@
         - { regexp: "^#?Port", line: "Port {{ ssh_port }}" }
         - { regexp: "^#?PermitRootLogin", line: "PermitRootLogin no" }
       notify: Restart SSH
+      
+    - name: Принудительный перезапуск SSH перед проверкой
+      meta: flush_handlers
 
+    - name: Финальная проверка связи по новому порту
+      delegate_to: localhost
+      become: no
+      command: >
+        ansible all -i {{ inventory_hostname }}, 
+        -m ping 
+        -e "ansible_port={{ ssh_port }} ansible_user={{ username }}"
+      register: ping_result
+      changed_when: false
 
+    - name: Успех!
+      debug:
+        msg: "Связь установлена. Команда для входа: ssh {{ username }}@{{ inventory_hostname }} -p {{ ssh_port }}"
 
   handlers:
     - name: Restart SSH
