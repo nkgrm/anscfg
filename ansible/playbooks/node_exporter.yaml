@@ -8,6 +8,11 @@
     user_name: "nodeusr"
 
   tasks:
+    - name: Установка tar (необходим для модуля unarchive)
+      package:
+        name: tar
+        state: present
+
     - name: Создать группу {{ user_name }}
       group:
         name: "{{ user_name }}"
@@ -68,4 +73,3 @@
     - name: Показать статус
       debug:
         var: service_status.stdout_lines
-
