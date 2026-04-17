@@ -1,0 +1,48 @@
+---
+- name: Generate SSL certificates for web service
+  hosts: all
+  become: yes
+  vars:
+    ssl_path: "/root/openssl/wg"
+    cname_dns: "your.wireguard.domain"
+    orig_dns: "original.dns.record"
+    server_ip: "1.2.3.4"
+    # Эти файлы уже лежат на сервере
+    root_ca_cert: "/root/openssl/rootCA.crt"
+    root_ca_key: "/root/openssl/rootCA.key"
+
+  tasks:
+    - name: Ensure directory exists
+      file:
+        path: "{{ ssl_path }}"
+        state: directory
+        mode: '0700'
+
+    - name: 1. Generate Private Key
+      community.crypto.openssl_privatekey:
+        path: "{{ ssl_path }}/wg.key"
+        size: 2048
+        type: RSA
+
+    - name: 2. Generate CSR (Certificate Signing Request)
+      community.crypto.openssl_csr:
+        path: "{{ ssl_path }}/wg.csr"
+        privatekey_path: "{{ ssl_path }}/wg.key"
+        common_name: "{{ cname_dns }}"
+        subject_alt_name:
+          - "DNS:{{ cname_dns }}"
+          - "DNS:{{ orig_dns }}"
+          - "IP:{{ server_ip }}"
+        digest: sha256
+
+    - name: 3. Sign Certificate with Root CA
+      community.crypto.x509_certificate:
+        path: "{{ ssl_path }}/wg.crt"
+        csr_path: "{{ ssl_path }}/wg.csr"
+        # Ansible сам найдет эти файлы по путям на удаленном сервере
+        ownca_path: "{{ root_ca_cert }}"
+        ownca_privatekey_path: "{{ root_ca_key }}"
+        provider: ownca
+        ownca_not_after: "+365d"
+        ownca_digest: sha256
+
