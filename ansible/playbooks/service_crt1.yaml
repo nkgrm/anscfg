@@ -1,0 +1,60 @@
+---
+- name: Создание и подпись сертификата сервера (GLPI)
+  hosts: all
+  become: yes
+  vars:
+    cert_dir: "/root/openssl"
+    service_dir: "{{ cert_dir }}/{{ server_name }}"
+    ca_passphrase: P@ssw0rd
+    server_name: "glpi-server"
+    domain: "glpi.lab.local"
+
+  tasks:
+    - name: 0. Подготовка директории для сертификатов
+      ansible.builtin.file:
+        path: "{{ service_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: 1. Генерация приватного ключа сервера (RSA)
+      community.crypto.openssl_privatekey:
+        path: "{{ service_dir }}/{{ server_name }}.key"
+        size: 2048
+        type: RSA
+        mode: '0600'
+
+    - name: 2. Создание CSR для сервера (с использованием данных из конфига)
+      community.crypto.openssl_csr_pipe:
+        privatekey_path: "{{ service_dir }}/{{ server_name }}.key"
+        common_name: "{{ domain }}"
+        # Добавляем данные из вашего конфига:
+        subject:
+          countryName: "RU"
+          stateOrProvinceName: "Tatarstan" # замените на реальные данные
+          localityName: "Almet"                 # например, Moscow
+          organizationName: "lab.local"         # например, IT Dept
+        subject_alt_name:
+          - "DNS:{{ domain }}"
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+          - nonRepudiation
+        basic_constraints:
+          - "CA:FALSE"
+        basic_constraints_critical: yes
+      register: server_csr
+
+    - name: 3. Подпись сертификата сервера вашим Root CA
+      community.crypto.x509_certificate:
+        path: "{{ service_dir }}/{{ server_name }}.crt"
+        csr_content: "{{ server_csr.csr }}"
+        provider: ownca
+        # Пути к корневому CA из предыдущего шага
+        ownca_path: "{{ cert_dir }}/rootCA.crt"
+        ownca_privatekey_path: "{{ cert_dir }}/rootCA.key"
+        ownca_privatekey_passphrase: "{{ ca_passphrase }}"
+        ownca_not_after: "+365d"
+        # Перенос расширений из CSR в сертификат
+        ownca_copy_extensions: copy
+        mode: '0644'
+
