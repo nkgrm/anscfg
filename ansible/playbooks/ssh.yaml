@@ -43,8 +43,26 @@
         validate: 'visudo -cf %s'
         create: yes
         mode: '0440'
+        
+    # --- РАЗДЕЛ 2: ФАЕРВОЛ (Firewalld) ---
+    - name: Проверка наличия и состояния firewalld
+      systemd:
+        name: firewalld
+      register: firewalld_check
+      failed_when: false # Не падаем, если сервиса вообще нет
 
-    # --- РАЗДЕЛ 2: ЗАЩИТА SSH ---
+    - name: Открываем новый порт SSH в Firewalld
+      firewalld:
+        port: "{{ ssh_port }}/tcp"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      when: 
+        - firewalld_check.status.ActiveState == "active"
+        - ansible_os_family == "RedHat"
+      ignore_errors: yes # На случай, если модуль не может загрузиться
+
+    # --- РАЗДЕЛ 3: ЗАЩИТА SSH ---
     - name: Генерация SSH-ключа на локальной машине
       delegate_to: localhost
       run_once: true
@@ -69,28 +87,11 @@
         - { regexp: "^#?PermitRootLogin", line: "PermitRootLogin no" }
       notify: Restart SSH
 
-    # --- РАЗДЕЛ 3: ФАЕРВОЛ (Firewalld) ---
-    - name: Проверка наличия и состояния firewalld
-      systemd:
-        name: firewalld
-      register: firewalld_check
-      failed_when: false # Не падаем, если сервиса вообще нет
-
-    - name: Открываем новый порт SSH в Firewalld
-      firewalld:
-        port: "{{ ssh_port }}/tcp"
-        permanent: yes
-        state: enabled
-        immediate: yes
-      when: 
-        - firewalld_check.status.ActiveState == "active"
-        - ansible_os_family == "RedHat"
-      ignore_errors: yes # На случай, если модуль не может загрузиться
 
 
   handlers:
     - name: Restart SSH
       service:
-        name: ssh
+        name: sshd
         state: restarted
 
