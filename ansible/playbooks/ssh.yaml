@@ -2,23 +2,20 @@
 - name: Полная настройка нового сервера
   hosts: all
   become: yes
+  become_method: su  # Раз вы используете вход через su -
+  become_user: root
+  become_flags: "-" 
   vars:
-    #запускать ansible-playbook ssh.yml -u root --ask-pass
     # --- Блок настроек пользователя ---
     username: "sshuser"
     admin_group: "wheel"
-    passwd: "P@ssw0rd" #введите новый пароль для пользователя
-    ssh_key_path: "~/.ssh/id_ed25519.pub"
+    passwd: "P@ssw0rd" 
+    ssh_key_path: "/home/grimm/.ssh/id_ed25519"
     # --- Блок настроек безопасности SSH ---
-    ssh_port: "2222"     # Новый порт SSH (выберите свой)
+    ssh_port: "22"
 
   tasks:
-    # --- РАЗДЕЛ 0: SELINUX (Критично для РЕД ОС) ---
-    - name: Установка зависимостей для SELinux
-      dnf:
-        name: python3-libselinux
-        state: present
-
+    # --- РАЗДЕЛ 0: SELINUX ---
     - name: Мгновенное переключение SELinux в Permissive
       shell: setenforce 0
       failed_when: false
@@ -32,7 +29,8 @@
       user:
         name: "{{ username }}"
         groups: "{{ admin_group }}"
-        append: yes	password: "{{  passwd  | password_hash('sha512') }}"
+        append: yes
+        password: "{{ passwd | password_hash('sha512') }}"
         shell: /bin/bash
         create_home: yes
         state: present
@@ -45,12 +43,12 @@
         create: yes
         mode: '0440'
         
-    # --- РАЗДЕЛ 2: ФАЕРВОЛ (Firewalld) ---
-    - name: Проверка наличия и состояния firewalld
+    # --- РАЗДЕЛ 2: ФАЕРВОЛ ---
+    - name: Проверка наличия firewalld
       systemd:
         name: firewalld
       register: firewalld_check
-      failed_when: false # Не падаем, если сервиса вообще нет
+      failed_when: false
 
     - name: Открываем новый порт SSH в Firewalld
       firewalld:
@@ -59,55 +57,54 @@
         state: enabled
         immediate: yes
       when: 
-        - firewalld_check.status.ActiveState == "active"
+        - firewalld_check.status is defined and firewalld_check.status.ActiveState == "active"
         - ansible_os_family == "RedHat"
-      ignore_errors: yes # На случай, если модуль не может загрузиться
+      ignore_errors: yes
 
     # --- РАЗДЕЛ 3: ЗАЩИТА SSH ---
     - name: Генерация SSH-ключа на локальной машине
       delegate_to: localhost
       run_once: true
       openssh_keypair:
-        path: "~/.ssh/id_ed25519"
+        path: "{{ ssh_key_path }}"
         type: ed25519
         state: present
+        owner: grimm
+        group: grimm
+        mode: '0600'
 
     - name: Добавление вашего SSH-ключа
       authorized_key:
         user: "{{ username }}"
         state: present
-        key: "{{ lookup('file', ssh_key_path) }}"
+        # Важно: добавляем .pub к пути, чтобы прочитать публичную часть
+        key: "{{ lookup('file', ssh_key_path + '.pub') }}"
 
-    - name: Настройка параметров SSH (порт, запрет паролей, запрет root)
+    - name: Создать файл баннера
+      copy:
+        dest: /etc/ssh/banner.txt
+        content: |
+          **********************************************************
+          Welcome to {{ inventory_hostname }}!
+          Hello from RedOS.
+          **********************************************************
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Настройка параметров SSH
       lineinfile:
         path: /etc/ssh/sshd_config
         regexp: "{{ item.regexp }}"
         line: "{{ item.line }}"
       loop:
+        - { regexp: "^#?Banner", line: "Banner /etc/ssh/banner.txt" }
         - { regexp: "^#?Port", line: "Port {{ ssh_port }}" }
         - { regexp: "^#?PermitRootLogin", line: "PermitRootLogin no" }
       notify: Restart SSH
-      
-    - name: Принудительный перезапуск SSH перед проверкой
-      meta: flush_handlers
-
-    - name: Финальная проверка связи по новому порту
-      delegate_to: localhost
-      become: no
-      command: >
-        ansible all -i {{ inventory_hostname }}, 
-        -m ping 
-        -e "ansible_port={{ ssh_port }} ansible_user={{ username }}"
-      register: ping_result
-      changed_when: false
-
-    - name: Успех!
-      debug:
-        msg: "Связь установлена. Команда для входа: ssh {{ username }}@{{ inventory_hostname }} -p {{ ssh_port }}"
 
   handlers:
     - name: Restart SSH
       service:
         name: sshd
         state: restarted
-
