@@ -1,0 +1,134 @@
+---
+- name: Полная автоматизация настройки узла
+  hosts: all
+  become: yes
+
+  vars:
+    # Переменные для удобства настройки
+    app_user: "deployer"
+    app_dir: "/var/www/myapp"
+    git_repo: "https://github.com"
+    web_port: 80
+
+  tasks:
+    # --- 1. СИСТЕМНЫЕ ФАКТЫ И ПОДГОТОВКА ---
+    - name: Собрать сведения о системе
+      ansible.builtin.setup:
+      register: server_facts
+
+    - name: Вывести версию ядра (отладка)
+      ansible.builtin.debug:
+        msg: "ОС: {{ ansible_distribution }} {{ ansible_distribution_version }}, Ядро: {{ ansible_kernel }}"
+
+    # --- 2. УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ И ГРУППАМИ ---
+    - name: Создать группу разработчиков
+      ansible.builtin.group:
+        name: devs
+        state: present
+
+    - name: Создать пользователя и добавить в группы (безопасно)
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        shell: /bin/bash
+        groups: devs, sudo
+        append: yes # Важно: сохраняет старые группы
+
+    # --- 3. РАБОТА С РЕПОЗИТОРИЯМИ И ПАКЕТАМИ ---
+    - name: Добавить PPA репозиторий (для Ubuntu)
+      ansible.builtin.apt_repository:
+        repo: 'ppa:ondrej/php'
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Установить базовый набор ПО
+      ansible.builtin.package:
+        name: 
+          - nginx
+          - git
+          - curl
+          - htop
+          - unzip
+        state: present
+        update_cache: yes
+
+    # --- 4. РАБОТА С ФАЙЛАМИ И ШАБЛОНАМИ ---
+    - name: Создать структуру папок проекта
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+      loop: # Цикл для создания нескольких папок сразу
+        - "{{ app_dir }}"
+        - "{{ app_dir }}/logs"
+        - "{{ app_dir }}/public"
+
+    - name: Скопировать статический конфиг
+      ansible.builtin.copy:
+        src: ./files/my_nginx.conf
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload Nginx # Вызовет обработчик (handler) в конце
+
+    - name: Создать индексную страницу из шаблона (Jinja2)
+      ansible.builtin.template:
+        src: ./templates/index.html.j2
+        dest: "{{ app_dir }}/public/index.html"
+
+    # --- 5. ГИБКАЯ ПРАВКА КОНФИГОВ (LINEINFILE / BLOCKINFILE) ---
+    - name: Настроить лимит памяти в php.ini
+      ansible.builtin.lineinfile:
+        path: /etc/php/8.2/fpm/php.ini
+        regexp: '^memory_limit ='
+        line: 'memory_limit = 512M'
+
+    - name: Добавить записи в /etc/hosts
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        block: |
+          10.0.0.50 database-server
+          10.0.0.51 cache-server
+
+    # --- 6. СКАЧИВАНИЕ, АРХИВЫ И GIT ---
+    - name: Клонировать репозиторий проекта
+      ansible.builtin.git:
+        repo: "{{ git_repo }}"
+        dest: "{{ app_dir }}/source"
+        version: main
+
+    - name: Скачать и распаковать архив со статикой
+      ansible.builtin.unarchive:
+        src: https://example.com
+        dest: "{{ app_dir }}/public"
+        remote_src: yes # Скачивание происходит силами сервера
+
+    # --- 7. СЕТЬ, КРОН И СЕРВИСЫ ---
+    - name: Разрешить HTTP трафик в Firewall (UFW)
+      community.general.ufw:
+        rule: allow
+        port: "{{ web_port }}"
+        proto: tcp
+
+    - name: Добавить бэкап в Cron (раз в сутки)
+      ansible.builtin.cron:
+        name: "Daily App Backup"
+        hour: "3"
+        minute: "0"
+        job: "tar -czf /backups/myapp.tar.gz {{ app_dir }}"
+
+    - name: Запустить и включить Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: yes
+
+  # --- ОБРАБОТЧИКИ (Выполняются только если файлы изменились) ---
+  handlers:
+    - name: Reload Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
