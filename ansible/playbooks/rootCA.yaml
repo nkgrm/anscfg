@@ -11,6 +11,22 @@
       ansible.builtin.dnf:
         name: python3-cryptography
         state: present
+    - name: Подготовка удаленного сервера (установка зависимостей)
+      block:
+        - name: 0.1 Установка системного пакета python3-pip
+          ansible.builtin.dnf:
+            name: python3-pip
+            state: present
+
+        - name: 0.2 Обновление библиотеки cryptography через pip
+          ansible.builtin.pip:
+            name: cryptography
+            state: latest
+
+        - name: 0.3 Установка коллекции community.crypto на удаленный сервер
+          ansible.builtin.shell: "ansible-galaxy collection install community.crypto"
+          register: collection_install
+          changed_when: "'nothing to do' not in collection_install.stdout"
 
     - name: 1. Создание защищенной директории
       ansible.builtin.file:
