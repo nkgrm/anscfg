@@ -23,7 +23,7 @@
       community.crypto.openssl_privatekey:
         path: "{{ cert_dir }}/rootCA.key"
         passphrase: "{{ ca_passphrase }}"
-        cipher: aes128
+        cipher: auto
         size: 2048
         type: RSA
         owner: root
