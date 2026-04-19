@@ -95,7 +95,7 @@
         content: |
           **********************************************************
           Welcome to {{ inventory_hostname }}!
-          Hello from RedOS.
+          Hello from {{ ansible_os_family }}.
           **********************************************************
         owner: root
         group: root
