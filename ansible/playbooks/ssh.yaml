@@ -71,8 +71,8 @@
         path: "{{ ssh_key_path }}"
         type: ed25519
         state: present
-        owner: grimm
-        group: grimm
+        owner: user
+        group: user
         mode: '0600'
 
     - name: Добавление ключа самому себе (localhost)
