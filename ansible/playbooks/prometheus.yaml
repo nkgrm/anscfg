@@ -1,0 +1,118 @@
+---
+- name: Установка системы мониторинга (Prometheus локально, Exporter на серверах)
+  hosts: all
+  become: yes
+  vars:
+    version: "node_exporter-1.10.2.linux-amd64"
+    node_user: "nodeusr"
+
+  tasks:
+    # --- Блок для локальной машины ---
+    - name: Установка Prometheus (ТОЛЬКО ЛОКАЛЬНО)
+      package:
+        name: prometheus
+        state: present
+      delegate_to: localhost
+      run_once: true  # Чтобы задача не повторялась для каждого хоста в инвентаре
+
+    - name: Запуск Prometheus (ТОЛЬКО ЛОКАЛЬНО)
+      systemd:
+        name: prometheus
+        state: started
+        enabled: yes
+      delegate_to: localhost
+      run_once: true
+    # --- Блок для всех серверов: ОЧИСТКА КОНФЛИКТОВ ---
+    - name: Сбор сведений о сервисах
+      service_facts:
+
+    - name: Остановить старый сервис prometheus-node-exporter (если есть)
+      systemd:
+        name: prometheus-node-exporter
+        state: stopped
+        enabled: no
+      when: "'prometheus-node-exporter.service' in ansible_facts.services"
+
+    - name: Удалить пакет prometheus-node-exporter для освобождения порта 9100
+      package:
+        name: prometheus-node-exporter
+        state: absent
+    # --- Блок для всех серверов ---
+    - name: Установка tar
+      package:
+        name: tar
+        state: present
+
+    - name: Создать пользователя для Node Exporter
+      user:
+        name: "{{ node_user }}"
+        shell: /usr/sbin/nologin
+        system: yes
+        create_home: no
+
+    - name: Скачать и распаковать бинарный файл
+      unarchive:
+        src: "https://github.com/prometheus/node_exporter/releases/download/v1.10.2/{{ version }}.tar.gz"
+        dest: /tmp
+        remote_src: yes
+
+    - name: Копировать бинарный файл в /usr/bin
+      copy:
+        src: "/tmp/{{ version }}/node_exporter"
+        dest: /usr/bin/node_exporter
+        mode: '0755'
+        owner: "{{ node_user }}"
+        group: "{{ node_user }}"
+        remote_src: yes
+
+    - name: Создать systemd unit файл
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Node Exporter
+          After=network.target
+
+          [Service]
+          User={{ node_user }}
+          Type=simple
+          ExecStart=/usr/bin/node_exporter
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Запустить Node Exporter на всех хостах
+      systemd:
+        name: node_exporter
+        enabled: yes
+        state: started
+        daemon_reload: yes
+    # --- 4. АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ КОНФИГУРАЦИИ (Локально) ---
+    - name: Обновить prometheus.yml со всеми хостами
+      copy:
+        dest: /etc/prometheus/prometheus.yml
+        content: |
+          global:
+            scrape_interval: 15s
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+
+            - job_name: 'nodes'
+              static_configs:
+                - targets:
+          {% for host in groups['all'] %}
+                  - '{{ hostvars[host].ansible_host | default(host) }}:9100'
+          {% endfor %}
+      delegate_to: localhost
+      run_once: true
+      notify: Перезапустить Prometheus
+
+  handlers:
+    - name: Перезапустить Prometheus
+      systemd:
+        name: prometheus
+        state: restarted
+      delegate_to: localhost
