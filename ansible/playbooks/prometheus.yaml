@@ -138,7 +138,7 @@
         url: "http://localhost:3000/api/datasources"
         method: POST
         user: "admin"
-        password: "password"
+        password: "admin"
         force_basic_auth: yes
         body_format: json
         body:
