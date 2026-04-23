@@ -51,9 +51,7 @@
 ## [openSUSE]
 ## green.example.com
 ## blue.example.com
-[localhost]
-localhost
-
-
-
-
+[server]
+redos  
+[admin]
+grimm ansible_connection=local #если пользователь находится локально, плейбук будет отрабатывать локально без подключения по ssh
