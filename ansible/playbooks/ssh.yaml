@@ -2,7 +2,7 @@
 - name: Полная настройка нового сервера
   hosts: all
   become: yes
-#  become_method: su  раскоментировать эти строчки если на удалённом сервере запрещён ssh под root и нет пользователя в sudoers
+#  become_method: su
 #  become_user: root
 #  become_flags: "-" 
   vars:
@@ -10,7 +10,10 @@
     username: "sshuser"
     admin_group: "{{ 'sudo' if ansible_os_family == 'Debian' else 'wheel' }}"
     passwd: "P@ssw0rd" 
-    ssh_key_path: "/home/user/.ssh/id_ed25519"
+    # Локальный пользователь, запускающий плейбук
+    local_user: "{{ lookup('env', 'USER') }}"
+    # Путь к ключу (используем ~, чтобы путь подстраивался под любого пользователя)
+    ssh_key_path: "~/.ssh/id_ed25519"
     # --- Блок настроек безопасности SSH ---
     ssh_port: "22"
 
@@ -71,22 +74,20 @@
         path: "{{ ssh_key_path }}"
         type: ed25519
         state: present
-        owner: user
-        group: user
+        owner: "{{ local_user }}"
         mode: '0600'
 
     - name: Добавление ключа самому себе (localhost)
       authorized_key:
-        user: user  # Ваше локальное имя пользователя
+        user: "{{ local_user }}"
         state: present
         key: "{{ lookup('file', ssh_key_path + '.pub') }}"
       delegate_to: localhost
 
-    - name: Добавление вашего SSH-ключа
+    - name: Добавление вашего SSH-ключа на удаленный сервер
       authorized_key:
         user: "{{ username }}"
         state: present
-        # Важно: добавляем .pub к пути, чтобы прочитать публичную часть
         key: "{{ lookup('file', ssh_key_path + '.pub') }}"
 
     - name: Создать файл баннера
