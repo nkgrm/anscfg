@@ -2,7 +2,7 @@
 - name: Полная настройка нового сервера
   hosts: all
   become: yes
-#  become_method: su  раскоментировать эти строчки в первый раз если на удалённом сервере запрещён ssh под root и нет пользователя в sudoers
+#  become_method: su  раскоментировать эти строчки если на удалённом сервере запрещён ssh под root и нет пользователя в sudoers
 #  become_user: root
 #  become_flags: "-" 
   vars:
@@ -10,7 +10,7 @@
     username: "sshuser"
     admin_group: "{{ 'sudo' if ansible_os_family == 'Debian' else 'wheel' }}"
     passwd: "P@ssw0rd" 
-    ssh_key_path: "/home/grimm/.ssh/id_ed25519"
+    ssh_key_path: "/home/user/.ssh/id_ed25519"
     # --- Блок настроек безопасности SSH ---
     ssh_port: "22"
 
@@ -77,7 +77,7 @@
 
     - name: Добавление ключа самому себе (localhost)
       authorized_key:
-        user: grimm  # Ваше локальное имя пользователя
+        user: user  # Ваше локальное имя пользователя
         state: present
         key: "{{ lookup('file', ssh_key_path + '.pub') }}"
       delegate_to: localhost
