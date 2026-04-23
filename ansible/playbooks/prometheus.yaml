@@ -1,43 +1,53 @@
 ---
-- name: Установка системы мониторинга (Prometheus локально, Exporter на серверах)
+- name: Установка системы мониторинга
   hosts: all
   become: yes
   vars:
     version: "node_exporter-1.10.2.linux-amd64"
     node_user: "nodeusr"
+    # Мягкая настройка: просто поменяй это значение на localhost или srv-1
+    monitoring_host: "srv-1" 
+    grafana_admin_user: "admin"
+    grafana_admin_password: "admin"
+    # Новые переменные для дашборда
+    dash_id: "1860"
+    dash_rev: "45"
+    dash_download_url: "https://grafana.com/api/dashboards/{{ dash_id }}/revisions/{{ dash_rev }}/download" 
+    dash_temp_file: "/tmp/{{ dash_id }}_rev{{ dash_rev }}.json"
 
   tasks:
-    # --- Блок для локальной машины ---
-    - name: Установка Prometheus (ТОЛЬКО ЛОКАЛЬНО)
+    # --- Блок установки мониторинга на выделенный хост ---
+    - name: Установка Prometheus
       package:
         name: prometheus
         state: present
-      delegate_to: localhost
-      run_once: true  # Чтобы задача не повторялась для каждого хоста в инвентаре
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
 
-    - name: Запуск Prometheus (ТОЛЬКО ЛОКАЛЬНО)
+    - name: Запуск Prometheus
       systemd:
         name: prometheus
         state: started
         enabled: yes
-      delegate_to: localhost
+      delegate_to: "{{ monitoring_host }}"
       run_once: true
-    # --- Блок для всех серверов: ОЧИСТКА КОНФЛИКТОВ ---
+
+    # --- Блок для всех серверов: ОЧИСТКА И УСТАНОВКА EXPORTER ---
     - name: Сбор сведений о сервисах
       service_facts:
 
-    - name: Остановить старый сервис prometheus-node-exporter (если есть)
+    - name: Остановить старый сервис prometheus-node-exporter
       systemd:
         name: prometheus-node-exporter
         state: stopped
         enabled: no
       when: "'prometheus-node-exporter.service' in ansible_facts.services"
 
-    - name: Удалить пакет prometheus-node-exporter для освобождения порта 9100
+    - name: Удалить пакет prometheus-node-exporter
       package:
         name: prometheus-node-exporter
         state: absent
-    # --- Блок для всех серверов ---
+
     - name: Установка tar
       package:
         name: tar
@@ -72,12 +82,10 @@
           [Unit]
           Description=Node Exporter
           After=network.target
-
           [Service]
           User={{ node_user }}
           Type=simple
           ExecStart=/usr/bin/node_exporter
-
           [Install]
           WantedBy=multi-user.target
 
@@ -87,58 +95,57 @@
         enabled: yes
         state: started
         daemon_reload: yes
-    # --- 4. АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ КОНФИГУРАЦИИ (Локально) ---
-    - name: Обновить prometheus.yml со всеми хостами
+
+    # --- Настройка конфигурации Prometheus ---
+    - name: Обновить prometheus.yml
       copy:
         dest: /etc/prometheus/prometheus.yml
         content: |
           global:
             scrape_interval: 15s
-
           scrape_configs:
             - job_name: 'prometheus'
               static_configs:
                 - targets: ['localhost:9090']
-
             - job_name: 'nodes'
               static_configs:
                 - targets:
           {% for host in groups['all'] %}
                   - '{{ hostvars[host].ansible_host | default(host) }}:9100'
           {% endfor %}
-      delegate_to: localhost
+      delegate_to: "{{ monitoring_host }}"
       run_once: true
       notify: Перезапустить Prometheus
 
-    # --- Блок для Grafana (ТОЛЬКО ЛОКАЛЬНО) ---
-    - name: Установка Grafana (ТОЛЬКО ЛОКАЛЬНО)
+    # --- Блок Grafana ---
+    - name: Установка Grafana
       package:
         name: grafana
         state: present
-      delegate_to: localhost
+      delegate_to: "{{ monitoring_host }}"
       run_once: true
 
-    - name: Запуск Grafana (ТОЛЬКО ЛОКАЛЬНО)
+    - name: Запуск Grafana
       systemd:
         name: grafana-server
         state: started
         enabled: yes
-      delegate_to: localhost
+      delegate_to: "{{ monitoring_host }}"
       run_once: true
 
     - name: Ожидание запуска Grafana
       wait_for:
         port: 3000
         delay: 3
-      delegate_to: localhost
+      delegate_to: "{{ monitoring_host }}"
       run_once: true
 
-    - name: Добавление Prometheus как Data Source в Grafana
+    - name: Добавление Prometheus как Data Source
       uri:
         url: "http://localhost:3000/api/datasources"
         method: POST
-        user: "admin"
-        password: "admin"
+        user: "{{ grafana_admin_user }}"
+        password: "{{ grafana_admin_password }}"
         force_basic_auth: yes
         body_format: json
         body:
@@ -146,45 +153,75 @@
           type: "prometheus"
           url: "http://localhost:9090"
           access: "proxy"
-          basicAuth: false
           isDefault: true
         status_code: [200, 409]
-      delegate_to: localhost
+      delegate_to: "{{ monitoring_host }}"
       run_once: true
 
-
-      
-    - name: Скачивание JSON дашборда Node Exporter (ID 1860)
+    # --- Работа с дашбордом ---
+    - name: Скачивание JSON дашборда
       get_url:
-        url: "https://grafana.com/api/dashboards/1860/revisions/45/download"
-        dest: "/tmp/node_exporter_dash.json"
-      delegate_to: localhost
+        url: "{{ dash_download_url }}"
+        dest: "{{ dash_temp_file }}"
+      delegate_to: "{{ monitoring_host }}"
       run_once: true
+
+    - name: Поиск файла дашборда
+      find:
+        paths: /tmp
+        patterns: "{{ dash_id }}*.json"
+      register: found_dashboards
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+
+    # --- БЛОК ОТЛАДКИ (DEBUG) ---
+    - name: Отладка поиска файлов
+      debug:
+        msg: 
+          - "Найдено файлов: {{ found_dashboards.matched }}"
+          - "Выбран файл для импорта: {{ found_dashboards.files[0].path if found_dashboards.matched > 0 else 'НИЧЕГО НЕ НАЙДЕНО' }}"
+      delegate_to: localhost # Выводим в консоль локально
+      run_once: true
+    - name: Чтение дашборда (slurp)
+      slurp:
+        src: "{{ found_dashboards.files[0].path }}"
+      register: remote_dash_json
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+      when: found_dashboards.matched > 0
 
     - name: Загрузка дашборда в Grafana
       uri:
         url: "http://localhost:3000/api/dashboards/import"
         method: POST
-        user: "admin"
-        password: "admin"
+        user: "{{ grafana_admin_user }}"
+        password: "{{ grafana_admin_password }}"
         force_basic_auth: yes
         body_format: json
         body:
-          dashboard: "{{ lookup('file', '/tmp/node_exporter_dash.json') | from_json }}"
+          dashboard: "{{ remote_dash_json.content | b64decode | from_json }}"
           overwrite: true
           inputs:
             - name: "DS_PROMETHEUS"
               pluginId: "prometheus"
               type: "datasource"
-              value: "Prometheus" # Убедитесь, что имя DataSource совпадает с вашим в Grafana
-        status_code: [200, 201, 202]
-      delegate_to: localhost
+              value: "Prometheus"
+        status_code: [200, 201]
+      delegate_to: "{{ monitoring_host }}"
       run_once: true
-
+      when: found_dashboards.matched > 0
+      
+    - name: Очистка временного файла дашборда
+      file:
+        path: "{{ found_dashboards.files[0].path }}"
+        state: absent
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+      when: found_dashboards.matched > 0
 
   handlers:
     - name: Перезапустить Prometheus
       systemd:
         name: prometheus
         state: restarted
-      delegate_to: localhost
+      delegate_to: "{{ monitoring_host }}"
