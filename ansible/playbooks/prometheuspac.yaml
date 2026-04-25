@@ -1,1 +1,146 @@
+---
+- name: Установка системы мониторинга (Пакетная версия)
+  hosts: all
+  become: yes
+  vars:
+    # Хост, на котором будет стоять Prometheus и Grafana
+    monitoring_host: "srv-1" 
+    grafana_admin_user: "admin"
+    grafana_admin_password: "admin"
+    # Параметры дашборда
+    dash_id: "1860"
+    dash_rev: "45"
+    dash_download_url: "https://grafana.com{{ dash_id }}/revisions/{{ dash_rev }}/download" 
+
+  tasks:
+    # --- РАЗДЕЛ 1: УСТАНОВКА PROMETHEUS И GRAFANA (Только на monitoring_host) ---
+    - name: Установка Prometheus и Grafana
+      package:
+        name: 
+          - prometheus
+          - grafana
+        state: present
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+
+    - name: Запуск базовых сервисов мониторинга
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - prometheus
+        - grafana-server
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+
+    # --- РАЗДЕЛ 2: УСТАНОВКА NODE EXPORTER (На все хосты) ---
+    - name: Очистка старых ручных установок (чтобы не было конфликтов)
+      systemd:
+        name: node_exporter
+        state: stopped
+        enabled: no
+      failed_when: false
+
+    - name: Установка Node Exporter из репозитория
+      package:
+        name: prometheus-node-exporter
+        state: present
+
+    - name: Запуск и включение Node Exporter
+      systemd:
+        name: prometheus-node-exporter
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # --- РАЗДЕЛ 3: НАСТРОЙКА PROMETHEUS (Сбор данных со всех) ---
+    - name: Обновить конфиг prometheus.yml
+      copy:
+        dest: /etc/prometheus/prometheus.yml
+        content: |
+          global:
+            scrape_interval: 15s
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+            - job_name: 'nodes'
+              static_configs:
+                - targets:
+          {% for host in groups['all'] %}
+                  - '{{ hostvars[host].ansible_host | default(host) }}:9100'
+          {% endfor %}
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+      notify: Restart Prometheus
+
+    # --- РАЗДЕЛ 4: НАСТРОЙКА GRAFANA (Data Source и Dashboard) ---
+    - name: Ожидание запуска Grafana
+      wait_for:
+        port: 3000
+        timeout: 30
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+
+    - name: Добавление Prometheus как Data Source в Grafana
+      uri:
+        url: "http://localhost:3000/api/datasources"
+        method: POST
+        user: "{{ grafana_admin_user }}"
+        password: "{{ grafana_admin_password }}"
+        force_basic_auth: yes
+        body_format: json
+        body:
+          name: "Prometheus"
+          type: "prometheus"
+          url: "http://localhost:9090"
+          access: "proxy"
+          isDefault: true
+        status_code: [200, 409]
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+
+    - name: Скачивание и импорт дашборда Node Exporter Full
+      block:
+        - name: Скачать JSON дашборда
+          get_url:
+            url: "{{ dash_download_url }}"
+            dest: "/tmp/dashboard_node.json"
+          register: dl_result
+          until: dl_result is success
+          retries: 3
+
+        - name: Чтение файла дашборда
+          slurp:
+            src: "/tmp/dashboard_node.json"
+          register: dash_content
+
+        - name: Импорт дашборда через API
+          uri:
+            url: "http://localhost:3000/api/dashboards/import"
+            method: POST
+            user: "{{ grafana_admin_user }}"
+            password: "{{ grafana_admin_password }}"
+            force_basic_auth: yes
+            body_format: json
+            body:
+              dashboard: "{{ dash_content.content | b64decode | from_json }}"
+              overwrite: true
+              inputs:
+                - name: "DS_PROMETHEUS"
+                  pluginId: "prometheus"
+                  type: "datasource"
+                  value: "Prometheus"
+            status_code: [200, 201]
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+      ignore_errors: yes # Если интернет на srv-1 все же подведет при скачивании дашборда
+
+  handlers:
+    - name: Restart Prometheus
+      systemd:
+        name: prometheus
+        state: restarted
+      delegate_to: "{{ monitoring_host }}"
 
