@@ -10,9 +10,15 @@
     # Параметры дашборда
     dash_id: "1860"
     dash_rev: "45"
-    dash_download_url: "https://grafana.com{{ dash_id }}/revisions/{{ dash_rev }}/download" 
+    # Оставил твою структуру URL, но добавил /api/dashboards/ для работы скачивания
+    dash_download_url: "https://grafana.com/dashboards/{{ dash_id }}/revisions/{{ dash_rev }}/download" 
 
   tasks:
+    # Определение имени пакета в зависимости от ОС (RED OS vs Alt Linux)
+    - name: Определение имени пакета
+      set_fact:
+        pkg_name: "{{ 'node_exporter' if ansible_distribution == 'Altlinux' else 'prometheus-node-exporter' }}"
+
     # --- РАЗДЕЛ 1: УСТАНОВКА PROMETHEUS И GRAFANA (Только на monitoring_host) ---
     - name: Установка Prometheus и Grafana
       package:
@@ -44,12 +50,12 @@
 
     - name: Установка Node Exporter из репозитория
       package:
-        name: prometheus-node-exporter
+        name: "{{ pkg_name }}"
         state: present
 
     - name: Запуск и включение Node Exporter
       systemd:
-        name: prometheus-node-exporter
+        name: "{{ pkg_name }}"
         state: started
         enabled: yes
         daemon_reload: yes
@@ -135,18 +141,17 @@
             status_code: [200, 201]
       delegate_to: "{{ monitoring_host }}"
       run_once: true
-      ignore_errors: yes # Если интернет на srv-1 все же подведет при скачивании дашборда
+      
     - name: Очистка временного файла дашборда
       file:
-        path: "{{ found_dashboards.files[0].path }}"
+        path: "/tmp/dashboard_node.json"
         state: absent
       delegate_to: "{{ monitoring_host }}"
       run_once: true
-      when: found_dashboards.matched > 0
+
   handlers:
     - name: Restart Prometheus
       systemd:
         name: prometheus
         state: restarted
       delegate_to: "{{ monitoring_host }}"
-
