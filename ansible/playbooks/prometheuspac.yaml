@@ -4,25 +4,25 @@
   become: yes
   vars:
     # Хост, на котором будет стоять Prometheus и Grafana
-    monitoring_host: "srv-1" 
+    monitoring_host: "srv-1"
     grafana_admin_user: "admin"
     grafana_admin_password: "admin"
     # Параметры дашборда
     dash_id: "1860"
     dash_rev: "45"
-    # Оставил твою структуру URL, но добавил /api/dashboards/ для работы скачивания
-    dash_download_url: "https://grafana.com/dashboards/{{ dash_id }}/revisions/{{ dash_rev }}/download" 
+    # Оставим свою структуру URL, мы добавили /api/dashboards/ для работы скачивания
+    dash_download_url: "https://grafana.com/api/dashboards/{{ dash_id }}/revisions/{{ dash_rev }}/download"
 
   tasks:
     # Определение имени пакета в зависимости от ОС (RED OS vs Alt Linux)
     - name: Определение имени пакета
       set_fact:
-        pkg_name: "{{ 'node_exporter' if ansible_distribution == 'Altlinux' else 'prometheus-node-exporter' }}"
+        pkg_name: "{{ 'node_exporter' if ansible_distribution == 'Altlinux' else 'prometheus-node_exporter' }}"
 
     # --- РАЗДЕЛ 1: УСТАНОВКА PROMETHEUS И GRAFANA (Только на monitoring_host) ---
     - name: Установка Prometheus и Grafana
       package:
-        name: 
+        name:
           - prometheus
           - grafana
         state: present
@@ -41,24 +41,23 @@
       run_once: true
 
     # --- РАЗДЕЛ 2: УСТАНОВКА NODE EXPORTER (На все хосты) ---
-    - name: Очистка старых ручных установок (чтобы не было конфликтов)
-      systemd:
-        name: node_exporter
-        state: stopped
-        enabled: no
-      failed_when: false
-
     - name: Установка Node Exporter из репозитория
       package:
-        name: "{{ pkg_name }}"
+        name: "prometheus-node_exporter"
         state: present
 
     - name: Запуск и включение Node Exporter
       systemd:
-        name: "{{ pkg_name }}"
-        state: started
+        name: "{{ item }}"
+        state: restarted
         enabled: yes
         daemon_reload: yes
+      loop:
+        - node_exporter
+        - prometheus-node_exporter
+      ignore_errors: yes
+      failed_when: false
+      no_log: true
 
     # --- РАЗДЕЛ 3: НАСТРОЙКА PROMETHEUS (Сбор данных со всех) ---
     - name: Обновить конфиг prometheus.yml
@@ -74,9 +73,9 @@
             - job_name: 'nodes'
               static_configs:
                 - targets:
-          {% for host in groups['all'] %}
+                  {% for host in groups['all'] %}
                   - '{{ hostvars[host].ansible_host | default(host) }}:9100'
-          {% endfor %}
+                  {% endfor %}
       delegate_to: "{{ monitoring_host }}"
       run_once: true
       notify: Restart Prometheus
@@ -139,15 +138,15 @@
                   type: "datasource"
                   value: "Prometheus"
             status_code: [200, 201]
-      delegate_to: "{{ monitoring_host }}"
-      run_once: true
-      
-    - name: Очистка временного файла дашборда
-      file:
-        path: "/tmp/dashboard_node.json"
-        state: absent
-      delegate_to: "{{ monitoring_host }}"
-      run_once: true
+          delegate_to: "{{ monitoring_host }}"
+          run_once: true
+
+        - name: Очистка временного файла дашборда
+          file:
+            path: "/tmp/dashboard_node.json"
+            state: absent
+          delegate_to: "{{ monitoring_host }}"
+          run_once: true
 
   handlers:
     - name: Restart Prometheus
