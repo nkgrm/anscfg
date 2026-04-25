@@ -14,11 +14,6 @@
     dash_download_url: "https://grafana.com/api/dashboards/{{ dash_id }}/revisions/{{ dash_rev }}/download"
 
   tasks:
-    # Определение имени пакета в зависимости от ОС (RED OS vs Alt Linux)
-    - name: Определение имени пакета
-      set_fact:
-        pkg_name: "{{ 'node_exporter' if ansible_distribution == 'Altlinux' else 'prometheus-node_exporter' }}"
-
     # --- РАЗДЕЛ 1: УСТАНОВКА PROMETHEUS И GRAFANA (Только на monitoring_host) ---
     - name: Установка Prometheus и Grafana
       package:
