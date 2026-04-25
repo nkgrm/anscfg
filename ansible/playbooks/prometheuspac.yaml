@@ -136,7 +136,13 @@
       delegate_to: "{{ monitoring_host }}"
       run_once: true
       ignore_errors: yes # Если интернет на srv-1 все же подведет при скачивании дашборда
-
+    - name: Очистка временного файла дашборда
+      file:
+        path: "{{ found_dashboards.files[0].path }}"
+        state: absent
+      delegate_to: "{{ monitoring_host }}"
+      run_once: true
+      when: found_dashboards.matched > 0
   handlers:
     - name: Restart Prometheus
       systemd:
