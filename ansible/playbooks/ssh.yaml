@@ -2,9 +2,9 @@
 - name: Полная настройка нового сервера
   hosts: all
   become: yes
-#  become_method: su
-#  become_user: root
-#  become_flags: "-" 
+#  become_method: su # Раскоментировать эти 3 строчки если пользователья нет в sudoers
+#  become_user: root # Запускать плейбук командой ansible-playbook <путь до плейбука> -k -K
+#  become_flags: "-" # сначала спросит пароль для подключения ssh, потом для повышения привелегии
   vars:
     # --- Блок настроек пользователя ---
     username: "sshuser"
