@@ -1,0 +1,12 @@
+sudo apt update
+sudo apt install openjdk-17-jre-headless -y
+mkdir forge-server && cd forge-server
+wget https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.10/forge-1.20.1-47.4.10-installer.jar
+java -jar forge-1.20.1-47.4.10-installer.jar --installServer
+chmod +x run.sh
+./run.sh
+vim  eula.txt | eula=false > eula=true
+vim server.properties | online-mode=true > online-mode=false
+./run.sh
+
+
