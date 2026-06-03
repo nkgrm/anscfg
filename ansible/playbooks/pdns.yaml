@@ -1,0 +1,15 @@
+---
+- name: Установка и настройка pdns и pdns-recursor
+  hosts: srv
+  become: true
+  tasks:
+    - name: Скачивание базы данных postgresql
+      ansible.builtin.package:
+      name: postgresql17-server
+      state: present
+      update_cache: yes
+
+    - name: Инициация БД 
+      shell: postgresql-17-setup initdb
+
+    - name: 
