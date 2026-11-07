@@ -12,4 +12,6 @@
     - name: Инициация БД 
       shell: postgresql-17-setup initdb
 
-    - name: 
+    - name: изменение конфигурационных файлов
+      ansible.builtin.file:
+      
