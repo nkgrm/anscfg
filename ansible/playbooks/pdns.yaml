@@ -13,5 +13,5 @@
       shell: postgresql-17-setup initdb
 
     - name: изменение конфигурационных файлов
-      ansible.builtin.file:
+      ansible.builtin.lineinfile:
       
