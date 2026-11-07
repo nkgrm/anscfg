@@ -14,4 +14,8 @@
 
     - name: изменение конфигурационных файлов
       ansible.builtin.lineinfile:
-      
+        path: /var/lib/postgresql/17/data/postgresql.conf
+        rexerp: '^listen address ='
+        line: 'listen address = *'
+
+    - name:
